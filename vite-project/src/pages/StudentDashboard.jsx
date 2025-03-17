@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
@@ -19,54 +19,87 @@ import {
   Tab,
   TabPanel,
   Progress,
+  Spinner,
 } from '@chakra-ui/react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function StudentDashboard() {
+  // State hooks
   const [availableTests, setAvailableTests] = useState([])
   const [testHistory, setTestHistory] = useState([])
   const [loading, setLoading] = useState(true)
+
+  // Context hooks
   const { user } = useAuth()
   const toast = useToast()
 
+  // Color mode hooks
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
+  const textColor = useColorModeValue('gray.600', 'gray.300')
 
-  useEffect(() => {
-    fetchAvailableTests()
-    fetchTestHistory()
+  // Memoized functions
+  const calculateScore = useMemo(() => (attempt) => {
+    if (!attempt?.score || !attempt?.test?.totalPoints) return 0
+    return Math.round((attempt.score / attempt.test.totalPoints) * 100)
   }, [])
 
+  // Effect hooks
+  useEffect(() => {
+    const loadData = async () => {
+      if (!user) {
+        setLoading(false)
+        return
+      }
+
+      try {
+        await Promise.all([
+          fetchAvailableTests(),
+          fetchTestHistory()
+        ])
+      } catch (error) {
+        console.error('Error loading dashboard data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
+  }, [user])
+
   const fetchAvailableTests = async () => {
+    if (!user) return
+
     try {
       // Get all completed attempts by the user
       const { data: attempts, error: attemptsError } = await supabase
         .from('test_attempts')
         .select('test_id')
         .eq('user_id', user.id)
-        .not('completed_at', 'is', null);
+        .not('completed_at', 'is', null)
 
-      if (attemptsError) throw attemptsError;
+      if (attemptsError) throw attemptsError
 
       // Get all published tests
       const { data: allTests, error: testsError } = await supabase
         .from('tests')
         .select('*')
         .eq('is_published', true)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
 
-      if (testsError) throw testsError;
+      if (testsError) throw testsError
 
       // Filter tests based on attempts and unlimited attempts setting
-      const attemptedTestIds = new Set(attempts?.map(a => a.test_id) || []);
+      const attemptedTestIds = new Set(attempts?.map(a => a.test_id) || [])
       const availableTests = allTests.filter(test => 
         !attemptedTestIds.has(test.id) || // Show tests that haven't been attempted
         test.allow_unlimited_attempts      // Or tests that allow unlimited attempts
-      );
+      )
 
-      setAvailableTests(availableTests);
+      setAvailableTests(availableTests)
     } catch (error) {
+      console.error('Error fetching available tests:', error)
       toast({
         title: 'Error fetching available tests',
         description: error.message,
@@ -78,6 +111,8 @@ export default function StudentDashboard() {
   }
 
   const fetchTestHistory = async () => {
+    if (!user) return
+
     try {
       const { data: testHistory, error: historyError } = await supabase
         .from('test_attempts')
@@ -112,6 +147,7 @@ export default function StudentDashboard() {
 
       setTestHistory(processedHistory)
     } catch (error) {
+      console.error('Error fetching test history:', error)
       toast({
         title: 'Error fetching test history',
         description: error.message,
@@ -119,22 +155,28 @@ export default function StudentDashboard() {
         duration: 5000,
         isClosable: true,
       })
-    } finally {
-      setLoading(false)
     }
   }
 
-  const calculateScore = (attempt) => {
-    if (!attempt?.score || !attempt?.test?.totalPoints) return 0
-    return Math.round((attempt.score / attempt.test.totalPoints) * 100)
+  // Loading state
+  if (loading) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <Stack spacing={4} align="center">
+          <Spinner size="xl" />
+          <Text>Loading dashboard...</Text>
+        </Stack>
+      </Container>
+    )
   }
 
+  // Main render
   return (
     <Container maxW="container.xl" py={{ base: '8', md: '12' }}>
       <Stack spacing={{ base: '8', md: '12' }}>
         <Stack>
           <Heading size="lg">Student Dashboard</Heading>
-          <Text color={useColorModeValue('gray.600', 'gray.300')}>
+          <Text color={textColor}>
             View available tests and your test history
           </Text>
         </Stack>
@@ -147,9 +189,7 @@ export default function StudentDashboard() {
 
           <TabPanels>
             <TabPanel>
-              {loading ? (
-                <Text>Loading available tests...</Text>
-              ) : availableTests.length === 0 ? (
+              {availableTests.length === 0 ? (
                 <Box
                   p={8}
                   bg={bgColor}
@@ -181,7 +221,7 @@ export default function StudentDashboard() {
                       <VStack align="stretch" spacing={4}>
                         <Stack>
                           <Heading size="md">{test.title}</Heading>
-                          <Text color={useColorModeValue('gray.600', 'gray.300')}>
+                          <Text color={textColor}>
                             {test.description}
                           </Text>
                         </Stack>
@@ -199,7 +239,7 @@ export default function StudentDashboard() {
 
                         <Button
                           as={RouterLink}
-                          to={`/test/${test.id}`}
+                          to={`/take-test/${test.id}`}
                           colorScheme="blue"
                         >
                           Start Test
@@ -212,9 +252,7 @@ export default function StudentDashboard() {
             </TabPanel>
 
             <TabPanel>
-              {loading ? (
-                <Text>Loading test history...</Text>
-              ) : testHistory.length === 0 ? (
+              {testHistory.length === 0 ? (
                 <Box
                   p={8}
                   bg={bgColor}
@@ -240,7 +278,7 @@ export default function StudentDashboard() {
                         <Stack direction="row" justify="space-between" align="center">
                           <Stack>
                             <Heading size="md">{attempt.test?.title || 'Untitled Test'}</Heading>
-                            <Text color={useColorModeValue('gray.600', 'gray.300')}>
+                            <Text color={textColor}>
                               {new Date(attempt.started_at).toLocaleDateString()}
                             </Text>
                           </Stack>
@@ -261,7 +299,7 @@ export default function StudentDashboard() {
                           borderRadius="full"
                         />
 
-                        <Text fontSize="sm" color={useColorModeValue('gray.600', 'gray.300')}>
+                        <Text fontSize="sm" color={textColor}>
                           Duration: {attempt.test?.duration || 0} minutes
                         </Text>
                       </VStack>

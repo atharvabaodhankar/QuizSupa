@@ -20,12 +20,13 @@ import {
   AlertIcon,
   AlertTitle,
   AlertDescription,
+  Spinner,
 } from '@chakra-ui/react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function TakeTest() {
-  const { testId } = useParams()
+  const { id } = useParams()
   const { user } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
@@ -34,6 +35,7 @@ export default function TakeTest() {
   const progressBarRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [test, setTest] = useState(null)
   const [questions, setQuestions] = useState([])
   const [currentQuestion, setCurrentQuestion] = useState(0)
@@ -41,6 +43,117 @@ export default function TakeTest() {
   const [timeLeft, setTimeLeft] = useState(0)
   const [testAttempt, setTestAttempt] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    const initTest = async () => {
+      if (!user) {
+        console.log('No user found in TakeTest')
+        setError('Please log in to take the test')
+        setLoading(false)
+        return
+      }
+
+      if (!id) {
+        console.log('No test ID provided')
+        setError('Invalid test ID')
+        setLoading(false)
+        return
+      }
+
+      try {
+        console.log('Initializing test:', { testId: id, userId: user.id })
+        await initializeTest()
+      } catch (error) {
+        console.error('Error in test initialization:', error)
+        setError(error.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initTest()
+  }, [user, id])
+
+  const initializeTest = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // First check if the test exists and is published
+      const { data: testData, error: testError } = await supabase
+        .from('tests')
+        .select(`
+          *,
+          questions (
+            *,
+            options (*)
+          )
+        `)
+        .eq('id', id)
+        .eq('is_published', true)
+        .single()
+
+      if (testError) {
+        console.error('Error fetching test:', testError)
+        throw new Error(testError.message)
+      }
+
+      if (!testData) {
+        console.error('Test not found or not published')
+        throw new Error('Test not found or not available')
+      }
+
+      console.log('Fetched test data:', testData)
+
+      // Check if user has already attempted this test
+      const { data: existingAttempts, error: attemptsError } = await supabase
+        .from('test_attempts')
+        .select('*')
+        .eq('test_id', id)
+        .eq('user_id', user.id)
+        .not('completed_at', 'is', null)
+
+      if (attemptsError) {
+        console.error('Error checking existing attempts:', attemptsError)
+        throw new Error(attemptsError.message)
+      }
+
+      if (existingAttempts?.length > 0 && !testData.allow_unlimited_attempts) {
+        console.error('Test already attempted')
+        throw new Error('You have already attempted this test')
+      }
+
+      // Create new test attempt
+      const { data: attemptData, error: attemptError } = await supabase
+        .from('test_attempts')
+        .insert({
+          test_id: id,
+          user_id: user.id,
+          started_at: new Date().toISOString(),
+        })
+        .select()
+        .single()
+
+      if (attemptError) {
+        console.error('Error creating test attempt:', attemptError)
+        throw new Error(attemptError.message)
+      }
+
+      console.log('Created test attempt:', attemptData)
+
+      // Initialize state
+      setTest(testData)
+      setQuestions(testData.questions || [])
+      setTimeLeft(testData.duration * 60) // Convert minutes to seconds
+      setTestAttempt(attemptData)
+      setCurrentQuestion(0)
+      setAnswers({})
+
+    } catch (error) {
+      console.error('Error in initializeTest:', error)
+      throw error
+    }
+  }
 
   const handleAnswerChange = useCallback((questionId, optionId) => {
     setAnswers((prev) => ({
@@ -110,65 +223,6 @@ export default function TakeTest() {
   }, [answers, questions, testAttempt, isSubmitting, navigate, toast])
 
   useEffect(() => {
-    const fetchTest = async () => {
-      try {
-        // Fetch test details
-        const { data: testData, error: testError } = await supabase
-          .from('tests')
-          .select('*')
-          .eq('id', testId)
-          .single()
-
-        if (testError) throw testError
-
-        // Fetch questions and options
-        const { data: questionsData, error: questionsError } = await supabase
-          .from('questions')
-          .select(`
-            *,
-            options (*)
-          `)
-          .eq('test_id', testId)
-
-        if (questionsError) throw questionsError
-
-        // Create test attempt
-        const { data: testAttemptData, error: testAttemptError } = await supabase
-          .from('test_attempts')
-          .insert([
-            {
-              test_id: testId,
-              user_id: user.id,
-              started_at: new Date().toISOString(),
-            },
-          ])
-          .select()
-          .single()
-
-        if (testAttemptError) throw testAttemptError
-
-        setTest(testData)
-        setQuestions(questionsData)
-        setTimeLeft(testData.duration * 60)
-        setTestAttempt(testAttemptData)
-      } catch (error) {
-        toast({
-          title: 'Error loading test',
-          description: error.message,
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        })
-        navigate('/student/dashboard')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchTest()
-  }, [testId, user.id, navigate, toast])
-
-  useEffect(() => {
     if (!timeLeft) return
 
     const timer = setInterval(() => {
@@ -187,22 +241,45 @@ export default function TakeTest() {
 
   if (loading) {
     return (
-      <Container maxW="container.md" py={8}>
-        <Text>Loading test...</Text>
+      <Container maxW="container.xl" py={8}>
+        <Stack spacing={4} align="center">
+          <Spinner size="xl" />
+          <Text>Loading test...</Text>
+        </Stack>
       </Container>
     )
   }
 
-  if (!test) {
+  if (error) {
     return (
-      <Container maxW="container.md" py={8}>
+      <Container maxW="container.xl" py={8}>
         <Alert status="error">
           <AlertIcon />
-          <AlertTitle>Test not found</AlertTitle>
-          <AlertDescription>
-            The test you're looking for doesn't exist or you don't have permission to access it.
-          </AlertDescription>
+          <VStack align="start">
+            <AlertTitle>Error loading test</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </VStack>
         </Alert>
+        <Button mt={4} onClick={() => navigate('/student/dashboard')}>
+          Return to Dashboard
+        </Button>
+      </Container>
+    )
+  }
+
+  if (!test || !testAttempt) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <Alert status="error">
+          <AlertIcon />
+          <VStack align="start">
+            <AlertTitle>Test not found</AlertTitle>
+            <AlertDescription>The requested test could not be loaded.</AlertDescription>
+          </VStack>
+        </Alert>
+        <Button mt={4} onClick={() => navigate('/student/dashboard')}>
+          Return to Dashboard
+        </Button>
       </Container>
     )
   }
