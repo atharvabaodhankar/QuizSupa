@@ -21,12 +21,18 @@ import {
   StatNumber,
   StatGroup,
   SimpleGrid,
+  Button,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
+  Spinner,
 } from '@chakra-ui/react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function TestAnalytics() {
-  const { testId } = useParams()
+  const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
   const { user } = useAuth()
@@ -34,50 +40,83 @@ export default function TestAnalytics() {
   const borderColor = useColorModeValue('gray.200', 'gray.700')
 
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [test, setTest] = useState(null)
   const [attempts, setAttempts] = useState([])
+  const [totalPoints, setTotalPoints] = useState(0)
   const [analytics, setAnalytics] = useState({
     totalAttempts: 0,
     averageScore: 0,
     passRate: 0,
     highestScore: 0,
-    lowestScore: 100,
+    lowestScore: 0,
   })
 
   useEffect(() => {
-    fetchTestData()
-  }, [testId])
+    const loadAnalytics = async () => {
+      if (!user) {
+        setError('Please log in to view analytics')
+        setLoading(false)
+        return
+      }
+
+      if (!id) {
+        setError('No test ID provided')
+        setLoading(false)
+        return
+      }
+
+      try {
+        console.log('Loading analytics for test:', id)
+        await fetchTestData()
+      } catch (error) {
+        console.error('Error loading analytics:', error)
+        setError(error.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadAnalytics()
+  }, [user, id])
 
   const fetchTestData = async () => {
     try {
+      console.log('Fetching test data for ID:', id)
+      
       // Fetch test details
       const { data: testData, error: testError } = await supabase
         .from('tests')
         .select(`
           *,
           questions (
+            id,
             points
           )
         `)
-        .eq('id', testId)
+        .eq('id', id)
         .single()
 
-      if (testError) throw testError
+      if (testError) {
+        console.error('Error fetching test:', testError)
+        throw new Error(testError.message)
+      }
+
+      if (!testData) {
+        console.error('Test not found')
+        throw new Error('Test not found')
+      }
+
+      console.log('Fetched test data:', testData)
 
       // Calculate total possible points
-      const totalPoints = testData.questions.reduce((sum, q) => sum + q.points, 0)
+      const calculatedTotalPoints = testData.questions?.reduce((sum, q) => sum + (q.points || 0), 0) || 0
+      console.log('Total points:', calculatedTotalPoints)
+      setTotalPoints(calculatedTotalPoints)
 
       // Verify ownership
       if (testData.created_by !== user.id) {
-        toast({
-          title: 'Access denied',
-          description: 'You do not have permission to view this test\'s analytics',
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        })
-        navigate('/teacher/dashboard')
-        return
+        throw new Error('You do not have permission to view this test\'s analytics')
       }
 
       // Fetch test attempts with user profiles
@@ -89,49 +128,73 @@ export default function TestAnalytics() {
             role
           )
         `)
-        .eq('test_id', testId)
+        .eq('test_id', id)
         .not('completed_at', 'is', null) // Only get completed attempts
         .order('created_at', { ascending: false })
 
-      if (attemptsError) throw attemptsError
+      if (attemptsError) {
+        console.error('Error fetching attempts:', attemptsError)
+        throw new Error(attemptsError.message)
+      }
+
+      console.log('Fetched attempts data:', attemptsData)
 
       // Calculate analytics
       const totalAttempts = attemptsData.length
-      const scores = attemptsData.map((attempt) => (attempt.score / totalPoints) * 100)
-      const averageScore = totalAttempts > 0 ? scores.reduce((a, b) => a + b, 0) / totalAttempts : 0
-      const passRate = totalAttempts > 0 
-        ? (attemptsData.filter((attempt) => attempt.score >= totalPoints * 0.7).length / totalAttempts) * 100 
+      const scores = attemptsData.map((attempt) => {
+        const score = calculatedTotalPoints > 0 ? (attempt.score / calculatedTotalPoints) * 100 : 0
+        return Math.round(score * 10) / 10 // Round to 1 decimal place
+      })
+
+      const averageScore = totalAttempts > 0 
+        ? scores.reduce((a, b) => a + b, 0) / totalAttempts 
+        : 0
+      const passRate = totalAttempts > 0
+        ? (scores.filter((score) => score >= 70).length / totalAttempts) * 100
         : 0
       const highestScore = totalAttempts > 0 ? Math.max(...scores) : 0
       const lowestScore = totalAttempts > 0 ? Math.min(...scores) : 0
 
-      setTest({ ...testData, totalPoints })
+      setTest(testData)
       setAttempts(attemptsData)
       setAnalytics({
         totalAttempts,
-        averageScore,
-        passRate,
-        highestScore,
-        lowestScore,
+        averageScore: Math.round(averageScore * 10) / 10,
+        passRate: Math.round(passRate * 10) / 10,
+        highestScore: Math.round(highestScore * 10) / 10,
+        lowestScore: Math.round(lowestScore * 10) / 10,
       })
+
     } catch (error) {
-      toast({
-        title: 'Error loading test analytics',
-        description: error.message,
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
-      navigate('/teacher/dashboard')
-    } finally {
-      setLoading(false)
+      console.error('Error in fetchTestData:', error)
+      throw error
     }
   }
 
   if (loading) {
     return (
       <Container maxW="container.xl" py={8}>
-        <Text>Loading analytics...</Text>
+        <Stack spacing={4} align="center">
+          <Spinner size="xl" />
+          <Text>Loading analytics...</Text>
+        </Stack>
+      </Container>
+    )
+  }
+
+  if (error) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <Alert status="error">
+          <AlertIcon />
+          <VStack align="start">
+            <AlertTitle>Error loading analytics</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </VStack>
+        </Alert>
+        <Button mt={4} onClick={() => navigate('/teacher/dashboard')}>
+          Return to Dashboard
+        </Button>
       </Container>
     )
   }
@@ -157,28 +220,28 @@ export default function TestAnalytics() {
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Average Score</StatLabel>
-              <StatNumber>{analytics.averageScore.toFixed(1)}%</StatNumber>
+              <StatNumber>{analytics.averageScore}%</StatNumber>
             </Stat>
           </Box>
 
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Pass Rate</StatLabel>
-              <StatNumber>{analytics.passRate.toFixed(1)}%</StatNumber>
+              <StatNumber>{analytics.passRate}%</StatNumber>
             </Stat>
           </Box>
 
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Highest Score</StatLabel>
-              <StatNumber>{analytics.highestScore.toFixed(1)}%</StatNumber>
+              <StatNumber>{analytics.highestScore}%</StatNumber>
             </Stat>
           </Box>
 
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Lowest Score</StatLabel>
-              <StatNumber>{analytics.lowestScore.toFixed(1)}%</StatNumber>
+              <StatNumber>{analytics.lowestScore}%</StatNumber>
             </Stat>
           </Box>
         </SimpleGrid>
@@ -206,18 +269,18 @@ export default function TestAnalytics() {
               </Thead>
               <Tbody>
                 {attempts.map((attempt) => {
-                  const score = (attempt.score / test.totalPoints) * 100
+                  const score = totalPoints > 0 ? Math.round((attempt.score / totalPoints) * 1000) / 10 : 0
                   const duration = attempt.completed_at
                     ? Math.round(
                         (new Date(attempt.completed_at) - new Date(attempt.started_at)) / 1000 / 60
                       )
-                    : null
+                    : 'In Progress'
 
                   return (
                     <Tr key={attempt.id}>
                       <Td>{new Date(attempt.started_at).toLocaleDateString()}</Td>
                       <Td>
-                        {attempt.score} / {test.totalPoints} ({score.toFixed(1)}%)
+                        {attempt.score} / {totalPoints} ({score}%)
                       </Td>
                       <Td>
                         <Progress
@@ -233,7 +296,7 @@ export default function TestAnalytics() {
                           {score >= 70 ? 'Pass' : 'Fail'}
                         </Badge>
                       </Td>
-                      <Td>{duration ? `${duration} minutes` : 'In Progress'}</Td>
+                      <Td>{typeof duration === 'number' ? `${duration} minutes` : duration}</Td>
                     </Tr>
                   )
                 })}

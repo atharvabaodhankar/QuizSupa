@@ -99,6 +99,21 @@ export default function TeacherDashboard() {
     }
   }
 
+  const handleViewAnalytics = (test) => {
+    if (!test || !test.id) {
+      console.error('Invalid test data for analytics:', test)
+      toast({
+        title: 'Error',
+        description: 'Cannot view analytics: Invalid test data',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+    console.log('Viewing analytics for test:', test.id)
+  }
+
   const handleEditTest = (test) => {
     if (!test || !test.id) {
       console.error('Invalid test data:', test)
@@ -218,6 +233,7 @@ export default function TeacherDashboard() {
                           as={RouterLink}
                           to={`/teacher/test-analytics/${test.id}`}
                           icon={<ViewIcon />}
+                          onClick={() => handleViewAnalytics(test)}
                         >
                           View Analytics
                         </MenuItem>
