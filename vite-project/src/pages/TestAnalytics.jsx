@@ -82,91 +82,57 @@ export default function TestAnalytics() {
 
   const fetchTestData = async () => {
     try {
-      console.log('Fetching test data for ID:', id)
-      
-      // Fetch test details
+      // Fetch test details with questions and points
       const { data: testData, error: testError } = await supabase
         .from('tests')
         .select(`
           *,
           questions (
             id,
+            text,
             points
           )
         `)
         .eq('id', id)
         .single()
 
-      if (testError) {
-        console.error('Error fetching test:', testError)
-        throw new Error(testError.message)
-      }
+      if (testError) throw testError
 
-      if (!testData) {
-        console.error('Test not found')
-        throw new Error('Test not found')
-      }
+      // Calculate total points
+      const totalPoints = testData.questions.reduce((sum, q) => sum + q.points, 0)
 
-      console.log('Fetched test data:', testData)
-
-      // Calculate total possible points
-      const calculatedTotalPoints = testData.questions?.reduce((sum, q) => sum + (q.points || 0), 0) || 0
-      console.log('Total points:', calculatedTotalPoints)
-      setTotalPoints(calculatedTotalPoints)
-
-      // Verify ownership
-      if (testData.created_by !== user.id) {
-        throw new Error('You do not have permission to view this test\'s analytics')
-      }
-
-      // Fetch test attempts with user profiles
+      // Fetch test attempts with student profiles
       const { data: attemptsData, error: attemptsError } = await supabase
         .from('test_attempts')
         .select(`
           *,
-          profiles!user_id (
-            role
+          student:profiles (
+            name,
+            roll_number
           )
         `)
         .eq('test_id', id)
-        .not('completed_at', 'is', null) // Only get completed attempts
-        .order('created_at', { ascending: false })
+        .order('completed_at', { ascending: false })
 
-      if (attemptsError) {
-        console.error('Error fetching attempts:', attemptsError)
-        throw new Error(attemptsError.message)
-      }
-
-      console.log('Fetched attempts data:', attemptsData)
+      if (attemptsError) throw attemptsError
 
       // Calculate analytics
-      const totalAttempts = attemptsData.length
-      const scores = attemptsData.map((attempt) => {
-        const score = calculatedTotalPoints > 0 ? (attempt.score / calculatedTotalPoints) * 100 : 0
-        return Math.round(score * 10) / 10 // Round to 1 decimal place
-      })
-
-      const averageScore = totalAttempts > 0 
-        ? scores.reduce((a, b) => a + b, 0) / totalAttempts 
-        : 0
-      const passRate = totalAttempts > 0
-        ? (scores.filter((score) => score >= 70).length / totalAttempts) * 100
-        : 0
-      const highestScore = totalAttempts > 0 ? Math.max(...scores) : 0
-      const lowestScore = totalAttempts > 0 ? Math.min(...scores) : 0
+      const completedAttempts = attemptsData.filter(a => a.completed_at)
+      const scores = completedAttempts.map(a => a.score)
+      const analytics = {
+        totalAttempts: completedAttempts.length,
+        averageScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
+        passRate: scores.length ? Math.round((scores.filter(s => s >= totalPoints * 0.4).length / scores.length) * 100) : 0,
+        highestScore: scores.length ? Math.max(...scores) : 0,
+        lowestScore: scores.length ? Math.min(...scores) : 0,
+      }
 
       setTest(testData)
       setAttempts(attemptsData)
-      setAnalytics({
-        totalAttempts,
-        averageScore: Math.round(averageScore * 10) / 10,
-        passRate: Math.round(passRate * 10) / 10,
-        highestScore: Math.round(highestScore * 10) / 10,
-        lowestScore: Math.round(lowestScore * 10) / 10,
-      })
-
+      setTotalPoints(totalPoints)
+      setAnalytics(analytics)
     } catch (error) {
-      console.error('Error in fetchTestData:', error)
+      console.error('Error fetching test data:', error)
       throw error
     }
   }
@@ -187,122 +153,114 @@ export default function TestAnalytics() {
       <Container maxW="container.xl" py={8}>
         <Alert status="error">
           <AlertIcon />
-          <VStack align="start">
-            <AlertTitle>Error loading analytics</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </VStack>
+          <AlertTitle>Error!</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button mt={4} onClick={() => navigate('/teacher/dashboard')}>
-          Return to Dashboard
-        </Button>
       </Container>
     )
   }
 
   return (
-    <Container maxW="container.xl" py={8}>
-      <Stack spacing={8}>
+    <Container maxW="container.xl" py={{ base: '8', md: '12' }}>
+      <Stack spacing={{ base: '8', md: '12' }}>
         <Stack>
-          <Heading size="lg">{test.title} - Analytics</Heading>
+          <Heading size="lg">{test?.title} - Analytics</Heading>
           <Text color={useColorModeValue('gray.600', 'gray.300')}>
-            View detailed performance analytics for this test
+            View student performance and test statistics
           </Text>
         </Stack>
 
-        <SimpleGrid columns={{ base: 1, md: 2, lg: 5 }} spacing={4}>
+        <SimpleGrid columns={{ base: 1, md: 2, lg: 5 }} spacing={6}>
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Total Attempts</StatLabel>
               <StatNumber>{analytics.totalAttempts}</StatNumber>
             </Stat>
           </Box>
-
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Average Score</StatLabel>
-              <StatNumber>{analytics.averageScore}%</StatNumber>
+              <StatNumber>{analytics.averageScore}/{totalPoints}</StatNumber>
             </Stat>
           </Box>
-
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Pass Rate</StatLabel>
               <StatNumber>{analytics.passRate}%</StatNumber>
             </Stat>
           </Box>
-
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Highest Score</StatLabel>
-              <StatNumber>{analytics.highestScore}%</StatNumber>
+              <StatNumber>{analytics.highestScore}/{totalPoints}</StatNumber>
             </Stat>
           </Box>
-
           <Box p={6} bg={bgColor} borderWidth="1px" borderColor={borderColor} borderRadius="lg">
             <Stat>
               <StatLabel>Lowest Score</StatLabel>
-              <StatNumber>{analytics.lowestScore}%</StatNumber>
+              <StatNumber>{analytics.lowestScore}/{totalPoints}</StatNumber>
             </Stat>
           </Box>
         </SimpleGrid>
 
         <Box
-          p={6}
           bg={bgColor}
           borderWidth="1px"
           borderColor={borderColor}
           borderRadius="lg"
-          overflowX="auto"
+          overflow="hidden"
         >
-          <Stack spacing={4}>
-            <Heading size="md">Attempt History</Heading>
-
-            <Table variant="simple">
-              <Thead>
-                <Tr>
-                  <Th>Date</Th>
-                  <Th>Score</Th>
-                  <Th>Progress</Th>
-                  <Th>Status</Th>
-                  <Th>Duration</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {attempts.map((attempt) => {
-                  const score = totalPoints > 0 ? Math.round((attempt.score / totalPoints) * 1000) / 10 : 0
-                  const duration = attempt.completed_at
-                    ? Math.round(
-                        (new Date(attempt.completed_at) - new Date(attempt.started_at)) / 1000 / 60
-                      )
-                    : 'In Progress'
-
-                  return (
-                    <Tr key={attempt.id}>
-                      <Td>{new Date(attempt.started_at).toLocaleDateString()}</Td>
-                      <Td>
-                        {attempt.score} / {totalPoints} ({score}%)
-                      </Td>
-                      <Td>
+          <Table variant="simple">
+            <Thead>
+              <Tr>
+                <Th>Student Name</Th>
+                <Th>Roll Number</Th>
+                <Th>Score</Th>
+                <Th>Percentage</Th>
+                <Th>Status</Th>
+                <Th>Completed At</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {attempts.map((attempt) => {
+                const percentage = Math.round((attempt.score / totalPoints) * 100)
+                return (
+                  <Tr key={attempt.id}>
+                    <Td>{attempt.student?.name || 'N/A'}</Td>
+                    <Td>{attempt.student?.roll_number || 'N/A'}</Td>
+                    <Td>
+                      {attempt.completed_at ? `${attempt.score}/${totalPoints}` : 'In Progress'}
+                    </Td>
+                    <Td>
+                      {attempt.completed_at ? (
                         <Progress
-                          value={score}
-                          colorScheme={score >= 70 ? 'green' : 'red'}
+                          value={percentage}
                           size="sm"
-                          borderRadius="full"
-                          width="200px"
+                          colorScheme={percentage >= 40 ? 'green' : 'red'}
                         />
-                      </Td>
-                      <Td>
-                        <Badge colorScheme={score >= 70 ? 'green' : 'red'}>
-                          {score >= 70 ? 'Pass' : 'Fail'}
+                      ) : (
+                        'In Progress'
+                      )}
+                    </Td>
+                    <Td>
+                      {attempt.completed_at ? (
+                        <Badge colorScheme={percentage >= 40 ? 'green' : 'red'}>
+                          {percentage >= 40 ? 'Pass' : 'Fail'}
                         </Badge>
-                      </Td>
-                      <Td>{typeof duration === 'number' ? `${duration} minutes` : duration}</Td>
-                    </Tr>
-                  )
-                })}
-              </Tbody>
-            </Table>
-          </Stack>
+                      ) : (
+                        <Badge colorScheme="yellow">In Progress</Badge>
+                      )}
+                    </Td>
+                    <Td>
+                      {attempt.completed_at
+                        ? new Date(attempt.completed_at).toLocaleString()
+                        : 'Not completed'}
+                    </Td>
+                  </Tr>
+                )
+              })}
+            </Tbody>
+          </Table>
         </Box>
       </Stack>
     </Container>

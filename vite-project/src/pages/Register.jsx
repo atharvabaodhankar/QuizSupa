@@ -22,6 +22,8 @@ export default function Register() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('student')
+  const [name, setName] = useState('')
+  const [rollNumber, setRollNumber] = useState('')
   const [loading, setLoading] = useState(false)
   const { signUp } = useAuth()
   const navigate = useNavigate()
@@ -31,7 +33,13 @@ export default function Register() {
     e.preventDefault()
     try {
       setLoading(true)
-      const { error } = await signUp({ email, password, role })
+      const { error } = await signUp({ 
+        email, 
+        password, 
+        role,
+        name: role === 'student' ? name : null,
+        rollNumber: role === 'student' ? rollNumber : null
+      })
       if (error) throw error
       toast({
         title: 'Success!',
@@ -75,37 +83,57 @@ export default function Register() {
         >
           <form onSubmit={handleSubmit}>
             <Stack spacing="6">
-              <Stack spacing="5">
-                <FormControl>
-                  <FormLabel htmlFor="email">Email</FormLabel>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </FormControl>
-                <FormControl>
-                  <FormLabel htmlFor="password">Password</FormLabel>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </FormControl>
-                <FormControl>
-                  <FormLabel>Role</FormLabel>
-                  <RadioGroup value={role} onChange={setRole}>
-                    <Stack direction="row" spacing={5}>
-                      <Radio value="student">Student</Radio>
-                      <Radio value="teacher">Teacher</Radio>
-                    </Stack>
-                  </RadioGroup>
-                </FormControl>
-              </Stack>
+              <FormControl>
+                <FormLabel>Role</FormLabel>
+                <RadioGroup value={role} onChange={setRole}>
+                  <Stack direction="row" spacing={5}>
+                    <Radio value="student">Student</Radio>
+                    <Radio value="teacher">Teacher</Radio>
+                  </Stack>
+                </RadioGroup>
+              </FormControl>
+
+              {role === 'student' && (
+                <>
+                  <FormControl isRequired>
+                    <FormLabel>Full Name</FormLabel>
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Enter your full name"
+                    />
+                  </FormControl>
+                  <FormControl isRequired>
+                    <FormLabel>Roll Number</FormLabel>
+                    <Input
+                      value={rollNumber}
+                      onChange={(e) => setRollNumber(e.target.value)}
+                      placeholder="Enter your roll number"
+                    />
+                  </FormControl>
+                </>
+              )}
+              
+              <FormControl>
+                <FormLabel htmlFor="email">Email</FormLabel>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel htmlFor="password">Password</FormLabel>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </FormControl>
               <Button
                 type="submit"
                 colorScheme="blue"

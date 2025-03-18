@@ -41,7 +41,7 @@ export const AuthProvider = ({ children }) => {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async ({ email, password, role }) => {
+  const signUp = async ({ email, password, role, name, rollNumber }) => {
     try {
       setError(null)
       
@@ -50,7 +50,17 @@ export const AuthProvider = ({ children }) => {
         throw new Error('Invalid role. Must be either "teacher" or "student".')
       }
 
-      console.log('Attempting signup with:', { email, role })
+      // Validate student fields
+      if (role === 'student') {
+        if (!name || !name.trim()) {
+          throw new Error('Name is required for students')
+        }
+        if (!rollNumber || !rollNumber.trim()) {
+          throw new Error('Roll number is required for students')
+        }
+      }
+
+      console.log('Attempting signup with:', { email, role, name, rollNumber })
 
       // First, sign up the user
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -59,6 +69,8 @@ export const AuthProvider = ({ children }) => {
         options: {
           data: {
             role,
+            name: role === 'student' ? name : null,
+            rollNumber: role === 'student' ? rollNumber : null,
           },
         },
       })
@@ -82,7 +94,9 @@ export const AuthProvider = ({ children }) => {
           .insert([
             {
               id: authData.user.id,
-              role: role
+              role: role,
+              name: role === 'student' ? name : null,
+              roll_number: role === 'student' ? rollNumber : null
             }
           ])
           .select()
@@ -100,7 +114,9 @@ export const AuthProvider = ({ children }) => {
           .insert([
             {
               id: authData.user.id,
-              role: role
+              role: role,
+              name: role === 'student' ? name : null,
+              roll_number: role === 'student' ? rollNumber : null
             }
           ])
           .select()

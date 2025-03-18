@@ -29,6 +29,7 @@ export default function StudentDashboard() {
   const [availableTests, setAvailableTests] = useState([])
   const [testHistory, setTestHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [userProfile, setUserProfile] = useState(null)
 
   // Context hooks
   const { user } = useAuth()
@@ -54,12 +55,30 @@ export default function StudentDashboard() {
       }
 
       try {
+        // First fetch the user's profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (profileError) throw profileError
+        setUserProfile(profileData)
+
+        // Then fetch other data
         await Promise.all([
           fetchAvailableTests(),
           fetchTestHistory()
         ])
       } catch (error) {
         console.error('Error loading dashboard data:', error)
+        toast({
+          title: 'Error loading data',
+          description: error.message,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
       } finally {
         setLoading(false)
       }
@@ -100,13 +119,7 @@ export default function StudentDashboard() {
       setAvailableTests(availableTests)
     } catch (error) {
       console.error('Error fetching available tests:', error)
-      toast({
-        title: 'Error fetching available tests',
-        description: error.message,
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
+      throw error
     }
   }
 
@@ -148,13 +161,7 @@ export default function StudentDashboard() {
       setTestHistory(processedHistory)
     } catch (error) {
       console.error('Error fetching test history:', error)
-      toast({
-        title: 'Error fetching test history',
-        description: error.message,
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
+      throw error
     }
   }
 
@@ -175,9 +182,9 @@ export default function StudentDashboard() {
     <Container maxW="container.xl" py={{ base: '8', md: '12' }}>
       <Stack spacing={{ base: '8', md: '12' }}>
         <Stack>
-          <Heading size="lg">Student Dashboard</Heading>
+          <Heading size="lg">Welcome, {userProfile?.name || 'Student'}</Heading>
           <Text color={textColor}>
-            View available tests and your test history
+            Roll Number: {userProfile?.roll_number || 'Not set'}
           </Text>
         </Stack>
 
@@ -223,6 +230,9 @@ export default function StudentDashboard() {
                           <Heading size="md">{test.title}</Heading>
                           <Text color={textColor}>
                             {test.description}
+                          </Text>
+                          <Text fontSize="sm" color={textColor}>
+                            Created by Teacher
                           </Text>
                         </Stack>
 
@@ -274,35 +284,37 @@ export default function StudentDashboard() {
                       borderColor={borderColor}
                       borderRadius="lg"
                     >
-                      <VStack align="stretch" spacing={4}>
-                        <Stack direction="row" justify="space-between" align="center">
-                          <Stack>
-                            <Heading size="md">{attempt.test?.title || 'Untitled Test'}</Heading>
-                            <Text color={textColor}>
-                              {new Date(attempt.started_at).toLocaleDateString()}
-                            </Text>
-                          </Stack>
-                          <Badge
-                            colorScheme={attempt.score >= (attempt.test.totalPoints * 0.7) ? 'green' : 'red'}
-                            fontSize="md"
-                            px={3}
-                            py={1}
-                          >
-                            {attempt.score} / {attempt.test.totalPoints} points
-                          </Badge>
+                      <Stack spacing={4}>
+                        <Stack>
+                          <Heading size="md">{attempt.test.title}</Heading>
+                          <Text color={textColor}>
+                            {attempt.test.description}
+                          </Text>
                         </Stack>
 
-                        <Progress
-                          value={calculateScore(attempt)}
-                          colorScheme={attempt.score >= (attempt.test.totalPoints * 0.7) ? 'green' : 'red'}
-                          size="sm"
-                          borderRadius="full"
-                        />
+                        <HStack spacing={4}>
+                          <VStack align="start" spacing={1}>
+                            <Text fontWeight="bold">Score</Text>
+                            <Text>
+                              {attempt.score}/{attempt.test.totalPoints} ({calculateScore(attempt)}%)
+                            </Text>
+                          </VStack>
 
-                        <Text fontSize="sm" color={textColor}>
-                          Duration: {attempt.test?.duration || 0} minutes
-                        </Text>
-                      </VStack>
+                          <VStack align="start" spacing={1}>
+                            <Text fontWeight="bold">Status</Text>
+                            <Badge colorScheme={calculateScore(attempt) >= 40 ? 'green' : 'red'}>
+                              {calculateScore(attempt) >= 40 ? 'Pass' : 'Fail'}
+                            </Badge>
+                          </VStack>
+
+                          <VStack align="start" spacing={1}>
+                            <Text fontWeight="bold">Completed</Text>
+                            <Text>
+                              {new Date(attempt.completed_at).toLocaleString()}
+                            </Text>
+                          </VStack>
+                        </HStack>
+                      </Stack>
                     </Box>
                   ))}
                 </Stack>
