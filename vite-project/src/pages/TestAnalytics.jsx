@@ -82,42 +82,79 @@ export default function TestAnalytics() {
 
   const fetchTestData = async () => {
     try {
-      // Fetch test details with questions and points
+      // First fetch just the test without questions to verify access
       const { data: testData, error: testError } = await supabase
         .from('tests')
-        .select(`
-          *,
-          questions (
-            id,
-            text,
-            points
-          )
-        `)
+        .select('id, title, description, duration, created_by, is_published')
         .eq('id', id)
         .single()
 
-      if (testError) throw testError
+      if (testError) {
+        console.error('Test fetch error:', testError)
+        throw testError
+      }
+
+      console.log('Basic test data:', testData)
+
+      // Then fetch questions separately
+      const { data: questionsData, error: questionsError } = await supabase
+        .from('questions')
+        .select('id, text, points')
+        .eq('test_id', id)
+
+      if (questionsError) {
+        console.error('Questions fetch error:', questionsError)
+        throw questionsError
+      }
+
+      console.log('Questions data:', questionsData)
 
       // Calculate total points
-      const totalPoints = testData.questions.reduce((sum, q) => sum + q.points, 0)
+      const totalPoints = questionsData.reduce((sum, q) => sum + q.points, 0)
 
-      // Fetch test attempts with student profiles
+      // Add a visible note on the page about the N/A issue
+      setTest({
+        ...testData,
+        note: "Note: If student names show as N/A, it may be because the test was taken before we added name tracking."
+      })
+
+      // Fetch attempts data
       const { data: attemptsData, error: attemptsError } = await supabase
         .from('test_attempts')
         .select(`
-          *,
-          student:profiles (
-            name,
-            roll_number
-          )
+          id,
+          test_id,
+          student_id,
+          student_name,
+          student_roll,
+          score,
+          completed_at,
+          created_at
         `)
         .eq('test_id', id)
+        .not('completed_at', 'is', null)
         .order('completed_at', { ascending: false })
 
-      if (attemptsError) throw attemptsError
+      if (attemptsError) {
+        console.error('Attempts fetch error:', attemptsError)
+        throw attemptsError
+      }
+
+      console.log('Raw attempts data:', attemptsData)
+
+      // Process attempts data
+      const processedAttempts = attemptsData.map(attempt => ({
+        ...attempt,
+        student: {
+          name: attempt.student_name || 'Unknown Student',
+          roll_number: attempt.student_roll || 'N/A'
+        }
+      }))
+
+      console.log('Processed attempts:', processedAttempts)
 
       // Calculate analytics
-      const completedAttempts = attemptsData.filter(a => a.completed_at)
+      const completedAttempts = processedAttempts.filter(a => a.completed_at)
       const scores = completedAttempts.map(a => a.score)
       const analytics = {
         totalAttempts: completedAttempts.length,
@@ -127,8 +164,14 @@ export default function TestAnalytics() {
         lowestScore: scores.length ? Math.min(...scores) : 0,
       }
 
-      setTest(testData)
-      setAttempts(attemptsData)
+      // Combine the data
+      const combinedTestData = {
+        ...testData,
+        questions: questionsData
+      }
+
+      setTest(combinedTestData)
+      setAttempts(processedAttempts)
       setTotalPoints(totalPoints)
       setAnalytics(analytics)
     } catch (error) {
@@ -168,6 +211,12 @@ export default function TestAnalytics() {
           <Text color={useColorModeValue('gray.600', 'gray.300')}>
             View student performance and test statistics
           </Text>
+
+          {test.note && (
+            <Box p={4} bg="yellow.100" borderRadius="md" mb={6}>
+              <Text fontWeight="medium">{test.note}</Text>
+            </Box>
+          )}
         </Stack>
 
         <SimpleGrid columns={{ base: 1, md: 2, lg: 5 }} spacing={6}>
@@ -213,10 +262,9 @@ export default function TestAnalytics() {
           <Table variant="simple">
             <Thead>
               <Tr>
-                <Th>Student Name</Th>
-                <Th>Roll Number</Th>
+                <Th>Student Information</Th>
                 <Th>Score</Th>
-                <Th>Percentage</Th>
+                <Th>Performance</Th>
                 <Th>Status</Th>
                 <Th>Completed At</Th>
               </Tr>
@@ -226,35 +274,45 @@ export default function TestAnalytics() {
                 const percentage = Math.round((attempt.score / totalPoints) * 100)
                 return (
                   <Tr key={attempt.id}>
-                    <Td>{attempt.student?.name || 'N/A'}</Td>
-                    <Td>{attempt.student?.roll_number || 'N/A'}</Td>
                     <Td>
-                      {attempt.completed_at ? `${attempt.score}/${totalPoints}` : 'In Progress'}
+                      <Stack spacing={1}>
+                        <Text fontWeight="medium">
+                          {attempt.student?.name || 'Unknown Student'}
+                        </Text>
+                        <Text fontSize="sm" color="gray.500">
+                          Roll No: {attempt.student?.roll_number || 'N/A'}
+                        </Text>
+                      </Stack>
                     </Td>
                     <Td>
-                      {attempt.completed_at ? (
-                        <Progress
-                          value={percentage}
-                          size="sm"
-                          colorScheme={percentage >= 40 ? 'green' : 'red'}
-                        />
-                      ) : (
-                        'In Progress'
-                      )}
+                      <Stack spacing={1}>
+                        <Text fontWeight="medium">
+                          {attempt.score}/{totalPoints}
+                        </Text>
+                        <Text fontSize="sm" color="gray.500">
+                          {percentage}%
+                        </Text>
+                      </Stack>
+                    </Td>
+                    <Td width="200px">
+                      <Progress
+                        value={percentage}
+                        size="sm"
+                        colorScheme={percentage >= 40 ? 'green' : 'red'}
+                        borderRadius="full"
+                      />
                     </Td>
                     <Td>
-                      {attempt.completed_at ? (
-                        <Badge colorScheme={percentage >= 40 ? 'green' : 'red'}>
-                          {percentage >= 40 ? 'Pass' : 'Fail'}
-                        </Badge>
-                      ) : (
-                        <Badge colorScheme="yellow">In Progress</Badge>
-                      )}
+                      <Badge
+                        colorScheme={percentage >= 40 ? 'green' : 'red'}
+                        padding="2"
+                        borderRadius="full"
+                      >
+                        {percentage >= 40 ? 'PASS' : 'FAIL'}
+                      </Badge>
                     </Td>
                     <Td>
-                      {attempt.completed_at
-                        ? new Date(attempt.completed_at).toLocaleString()
-                        : 'Not completed'}
+                      {new Date(attempt.completed_at).toLocaleString()}
                     </Td>
                   </Tr>
                 )

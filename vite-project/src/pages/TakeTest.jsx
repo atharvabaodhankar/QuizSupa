@@ -110,7 +110,7 @@ export default function TakeTest() {
         .from('test_attempts')
         .select('*')
         .eq('test_id', id)
-        .eq('user_id', user.id)
+        .eq('student_id', user.id)
         .not('completed_at', 'is', null)
 
       if (attemptsError) {
@@ -123,12 +123,28 @@ export default function TakeTest() {
         throw new Error('You have already attempted this test')
       }
 
+      // Get student profile information
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('name, roll_number')
+        .eq('id', user.id)
+        .single()
+
+      if (profileError) {
+        console.error('Error fetching student profile:', profileError)
+        throw new Error(profileError.message)
+      }
+
       // Create new test attempt
+      console.log('Creating test attempt with student_id:', user.id)
+      
       const { data: attemptData, error: attemptError } = await supabase
         .from('test_attempts')
         .insert({
           test_id: id,
-          user_id: user.id,
+          student_id: user.id,
+          student_name: profileData.name,
+          student_roll: profileData.roll_number,
           started_at: new Date().toISOString(),
         })
         .select()

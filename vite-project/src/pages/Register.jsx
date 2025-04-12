@@ -17,6 +17,7 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
 
 export default function Register() {
   const [email, setEmail] = useState('')
@@ -25,14 +26,25 @@ export default function Register() {
   const [name, setName] = useState('')
   const [rollNumber, setRollNumber] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const { signUp } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setLoading(true)
+    setError(null)
+
     try {
-      setLoading(true)
+      // Debug: Check profiles table
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('*')
+      
+      console.log('All profiles:', profiles)
+      console.log('Current form data:', { email, password, role, name, rollNumber })
+
       const { error } = await signUp({ 
         email, 
         password, 

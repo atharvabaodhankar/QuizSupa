@@ -48,44 +48,50 @@ export default function StudentDashboard() {
 
   // Effect hooks
   useEffect(() => {
-    const loadData = async () => {
-      if (!user) {
-        setLoading(false)
-        return
-      }
-
-      try {
-        // First fetch the user's profile
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-
-        if (profileError) throw profileError
-        setUserProfile(profileData)
-
-        // Then fetch other data
-        await Promise.all([
-          fetchAvailableTests(),
-          fetchTestHistory()
-        ])
-      } catch (error) {
-        console.error('Error loading dashboard data:', error)
-        toast({
-          title: 'Error loading data',
-          description: error.message,
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        })
-      } finally {
-        setLoading(false)
-      }
+    if (user) {
+      fetchDashboardData()
     }
-
-    loadData()
   }, [user])
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true)
+      console.log('Current user ID:', user.id)
+
+      // Debug: Check current user's profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+      
+      if (profileError) {
+        console.error('Error fetching profile:', profileError)
+      } else {
+        console.log('Current user profile:', profileData)
+      }
+
+      // First fetch the user's profile
+      setUserProfile(profileData)
+
+      // Then fetch other data
+      await Promise.all([
+        fetchAvailableTests(),
+        fetchTestHistory()
+      ])
+    } catch (error) {
+      console.error('Error loading dashboard data:', error)
+      toast({
+        title: 'Error loading data',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const fetchAvailableTests = async () => {
     if (!user) return
@@ -95,7 +101,7 @@ export default function StudentDashboard() {
       const { data: attempts, error: attemptsError } = await supabase
         .from('test_attempts')
         .select('test_id')
-        .eq('user_id', user.id)
+        .eq('student_id', user.id)
         .not('completed_at', 'is', null)
 
       if (attemptsError) throw attemptsError
@@ -141,8 +147,9 @@ export default function StudentDashboard() {
             )
           )
         `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+        .eq('student_id', user.id)
+        .not('completed_at', 'is', null)  // Only show completed tests
+        .order('completed_at', { ascending: false })  // Order by completion date
 
       if (historyError) throw historyError
 
